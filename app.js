@@ -2,6 +2,10 @@ const STORAGE_KEY = "wishlist.items.v1";
 const SESSION_KEY = "wishlist.items.session.v1";
 const HISTORY_STATE_KEY = "wishlistItems";
 const ACTIVE_LIST_KEY = "wishlist.activeList.v1";
+const WISHLISTS_STATE_KEY = "wishlist.wishlistGroups.v1";
+const WISHLISTS_SESSION_KEY = "wishlist.wishlistGroups.session.v1";
+const WISHLISTS_HISTORY_KEY = "wishlistGroups";
+const ACTIVE_WISHLIST_KEY = "wishlist.activeWishlist.v1";
 const PROJECTS_STATE_KEY = "wishlist.projectGroups.v1";
 const PROJECTS_SESSION_KEY = "wishlist.projectGroups.session.v1";
 const PROJECTS_HISTORY_KEY = "projectGroups";
@@ -46,6 +50,10 @@ const searchInput = document.querySelector("#search-input");
 const categoryFilter = document.querySelector("#category-filter");
 const statusFilter = document.querySelector("#status-filter");
 const sortSelect = document.querySelector("#sort-select");
+const wishlistControls = document.querySelector("#wishlist-controls");
+const wishlistSelect = document.querySelector("#wishlist-select");
+const newWishlistButton = document.querySelector("#new-wishlist");
+const renameWishlistButton = document.querySelector("#rename-wishlist");
 const projectControls = document.querySelector("#project-controls");
 const projectSelect = document.querySelector("#project-select");
 const newProjectButton = document.querySelector("#new-project");
@@ -58,6 +66,8 @@ const cardTemplate = document.querySelector("#wish-card-template");
 const statCount = document.querySelector("#stat-count");
 const statHigh = document.querySelector("#stat-high");
 const statPurchased = document.querySelector("#stat-purchased");
+const exportPicker = document.querySelector(".export-picker");
+const exportMenu = document.querySelector("#export-menu");
 const exportPdfButton = document.querySelector("#export-pdf");
 const importCodeButton = document.querySelector("#import-code");
 const importInput = document.querySelector("#import-data");
@@ -68,6 +78,14 @@ const restoreFeedback = document.querySelector("#restore-feedback");
 const restoreSubmitButton = document.querySelector("#restore-submit");
 const restoreCancelButton = document.querySelector("#restore-cancel");
 const restoreCloseButton = document.querySelector("#restore-close");
+const nameModal = document.querySelector("#name-modal");
+const nameModalTitle = document.querySelector("#name-modal-title");
+const nameModalLabel = document.querySelector("#name-modal-label");
+const nameModalInput = document.querySelector("#name-modal-input");
+const nameModalFeedback = document.querySelector("#name-modal-feedback");
+const nameModalSubmitButton = document.querySelector("#name-modal-submit");
+const nameModalCancelButton = document.querySelector("#name-modal-cancel");
+const nameModalCloseButton = document.querySelector("#name-modal-close");
 
 const priorityWeight = {
   High: 3,
@@ -77,19 +95,20 @@ const priorityWeight = {
 
 const REMOVE_ANIMATION_MS = 280;
 const LIST_REFRESH_ANIMATION_MS = 520;
-const WORKSPACE_ANIMATION_MS = 520;
 const EXPORT_RESET_DELAY_MS = 900;
 const exportPdfButtonLabel = exportPdfButton?.textContent || "Export PDF";
 
 let storageAvailable = true;
 let activeListKey = getInitialListKey();
+let wishlistState = loadWishlistState();
+let activeWishlistId = getInitialWishlistId();
 let projectState = loadProjectState();
 let activeProjectId = getInitialProjectId();
 let items = loadItems(activeListKey);
 let recentlyAddedItemId = "";
 let recentlyToggledItemId = "";
 let listRefreshTimer = 0;
-let workspaceAnimationTimer = 0;
+let nameModalSubmitHandler = null;
 
 function createId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
@@ -133,6 +152,15 @@ function getProjectStateTime(state) {
   );
 }
 
+function getWishlistStateTime(state) {
+  if (!state?.wishlists?.length) return 0;
+
+  return Math.max(
+    new Date(state.updatedAt || 0).getTime() || 0,
+    ...state.wishlists.map((wishlist) => getNewestItemTime(wishlist.items || [])),
+  );
+}
+
 function getListConfig(listKey = activeListKey) {
   return LISTS[listKey] || LISTS.wishlist;
 }
@@ -169,6 +197,77 @@ function readStoredItems(storage, key) {
     return normalizeStoredItems(JSON.parse(storage.getItem(key)) || []);
   } catch {
     return [];
+  }
+}
+
+function normalizeWishlistState(value) {
+  if (Array.isArray(value)) {
+    return {
+      activeWishlistId: "wishlist-default",
+      updatedAt: new Date().toISOString(),
+      wishlists: [
+        {
+          id: "wishlist-default",
+          name: "My Wishlist",
+          items: normalizeStoredItems(value),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  if (!value || !Array.isArray(value.wishlists)) {
+    return {
+      activeWishlistId: "wishlist-default",
+      updatedAt: new Date().toISOString(),
+      wishlists: [
+        {
+          id: "wishlist-default",
+          name: "My Wishlist",
+          items: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  const wishlists = value.wishlists.map((wishlist, index) => ({
+    id: wishlist.id || `wishlist-${index + 1}`,
+    name: String(wishlist.name || `Wishlist ${index + 1}`),
+    items: normalizeStoredItems(wishlist.items || []),
+    createdAt: wishlist.createdAt || new Date().toISOString(),
+    updatedAt: wishlist.updatedAt || wishlist.createdAt || new Date().toISOString(),
+  }));
+
+  if (!wishlists.length) {
+    wishlists.push({
+      id: "wishlist-default",
+      name: "My Wishlist",
+      items: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    activeWishlistId: wishlists.some((wishlist) => wishlist.id === value.activeWishlistId)
+      ? value.activeWishlistId
+      : wishlists[0].id,
+    wishlists,
+    updatedAt: value.updatedAt || new Date().toISOString(),
+  };
+}
+
+function readWishlistState(storage, key) {
+  if (!storage) return null;
+
+  try {
+    const stored = JSON.parse(storage.getItem(key));
+    return stored ? normalizeWishlistState(stored) : null;
+  } catch {
+    return null;
   }
 }
 
@@ -251,6 +350,15 @@ function readHistoryItems(listKey) {
   }
 }
 
+function readWishlistStateFromHistory() {
+  try {
+    const stored = window.history?.state?.[WISHLISTS_HISTORY_KEY];
+    return stored ? normalizeWishlistState(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
 function readProjectStateFromHistory() {
   try {
     const stored = window.history?.state?.[PROJECTS_HISTORY_KEY];
@@ -258,6 +366,29 @@ function readProjectStateFromHistory() {
   } catch {
     return null;
   }
+}
+
+function loadWishlistState() {
+  const localStore = getBrowserStorage("localStorage");
+  const sessionStore = getBrowserStorage("sessionStorage");
+  const states = [
+    readWishlistState(localStore, WISHLISTS_STATE_KEY),
+    readWishlistState(sessionStore, WISHLISTS_SESSION_KEY),
+    readWishlistStateFromHistory(),
+  ].filter(Boolean);
+
+  const restoredState = states.sort((a, b) => getWishlistStateTime(b) - getWishlistStateTime(a))[0];
+  if (restoredState) return restoredState;
+
+  const legacyItems = [
+    readStoredItems(localStore, LISTS.wishlist.storageKey),
+    readStoredItems(sessionStore, LISTS.wishlist.sessionKey),
+    readHistoryItems("wishlist"),
+  ]
+    .filter((entry) => entry.length > 0)
+    .sort((a, b) => getNewestItemTime(b) - getNewestItemTime(a))[0];
+
+  return normalizeWishlistState(legacyItems || null);
 }
 
 function loadProjectState() {
@@ -283,6 +414,21 @@ function loadProjectState() {
   return normalizeProjectState(legacyItems || null);
 }
 
+function getInitialWishlistId() {
+  const params = new URLSearchParams(window.location.search);
+  const requestedWishlist = params.get("wishlist");
+  if (wishlistState.wishlists.some((wishlist) => wishlist.id === requestedWishlist)) return requestedWishlist;
+
+  try {
+    const savedWishlist = getBrowserStorage("localStorage")?.getItem(ACTIVE_WISHLIST_KEY);
+    if (wishlistState.wishlists.some((wishlist) => wishlist.id === savedWishlist)) return savedWishlist;
+  } catch {
+    // Fall through to stored wishlist state.
+  }
+
+  return wishlistState.activeWishlistId || wishlistState.wishlists[0].id;
+}
+
 function getInitialProjectId() {
   const params = new URLSearchParams(window.location.search);
   const requestedProject = params.get("project");
@@ -298,6 +444,17 @@ function getInitialProjectId() {
   return projectState.activeProjectId || projectState.projects[0].id;
 }
 
+function getActiveWishlist() {
+  let wishlist = wishlistState.wishlists.find((entry) => entry.id === activeWishlistId);
+
+  if (!wishlist) {
+    wishlist = wishlistState.wishlists[0];
+    activeWishlistId = wishlist.id;
+  }
+
+  return wishlist;
+}
+
 function getActiveProject() {
   let project = projectState.projects.find((entry) => entry.id === activeProjectId);
 
@@ -310,6 +467,10 @@ function getActiveProject() {
 }
 
 function loadItems(listKey = activeListKey) {
+  if (listKey === "wishlist") {
+    return [...getActiveWishlist().items];
+  }
+
   if (listKey === "projects") {
     return [...getActiveProject().items];
   }
@@ -352,6 +513,16 @@ function saveActiveListSetting(storage) {
   }
 }
 
+function saveActiveWishlistSetting(storage) {
+  if (!storage) return;
+
+  try {
+    storage.setItem(ACTIVE_WISHLIST_KEY, activeWishlistId);
+  } catch {
+    // The active wishlist can fall back to the first wishlist if storage is unavailable.
+  }
+}
+
 function saveActiveProjectSetting(storage) {
   if (!storage) return;
 
@@ -364,6 +535,18 @@ function saveActiveProjectSetting(storage) {
 
 function saveToHistoryState() {
   try {
+    if (activeListKey === "wishlist") {
+      window.history.replaceState(
+        {
+          ...(window.history.state || {}),
+          [WISHLISTS_HISTORY_KEY]: wishlistState,
+        },
+        "",
+        window.location.href,
+      );
+      return true;
+    }
+
     if (activeListKey === "projects") {
       window.history.replaceState(
         {
@@ -394,6 +577,21 @@ function saveToHistoryState() {
 function saveItems() {
   const localStore = getBrowserStorage("localStorage");
   const sessionStore = getBrowserStorage("sessionStorage");
+
+  if (activeListKey === "wishlist") {
+    const wishlist = getActiveWishlist();
+    wishlist.items = [...items];
+    wishlist.updatedAt = new Date().toISOString();
+    wishlistState.activeWishlistId = activeWishlistId;
+    wishlistState.updatedAt = new Date().toISOString();
+    const savedLocally = saveToStorage(localStore, WISHLISTS_STATE_KEY, wishlistState);
+    const savedForSession = saveToStorage(sessionStore, WISHLISTS_SESSION_KEY, wishlistState);
+    const savedInHistory = saveToHistoryState();
+    saveActiveListSetting(localStore);
+    saveActiveWishlistSetting(localStore);
+    storageAvailable = savedLocally || savedForSession || savedInHistory;
+    return storageAvailable;
+  }
 
   if (activeListKey === "projects") {
     const project = getActiveProject();
@@ -444,13 +642,9 @@ function triggerListRefreshAnimation() {
 function triggerWorkspaceAnimation() {
   if (!workspaceEl || prefersReducedMotion()) return;
 
-  window.clearTimeout(workspaceAnimationTimer);
   workspaceEl.classList.remove("is-switching");
   void workspaceEl.offsetWidth;
   workspaceEl.classList.add("is-switching");
-  workspaceAnimationTimer = window.setTimeout(() => {
-    workspaceEl.classList.remove("is-switching");
-  }, WORKSPACE_ANIMATION_MS);
 }
 
 function renderWithWorkspaceAnimation() {
@@ -470,12 +664,62 @@ function resetExportButton(delay = 0) {
   window.setTimeout(() => setExportButtonBusy(false), delay);
 }
 
+function closeExportMenu() {
+  if (!exportMenu || !exportPdfButton) return;
+  exportMenu.hidden = true;
+  exportPdfButton.setAttribute("aria-expanded", "false");
+}
+
+function openExportMenu() {
+  if (!exportMenu || !exportPdfButton) return;
+
+  if (!items.length) {
+    showFeedback("Add at least one item before exporting.", true);
+    return;
+  }
+
+  exportMenu.hidden = false;
+  exportPdfButton.setAttribute("aria-expanded", "true");
+}
+
+function toggleExportMenu() {
+  if (!exportMenu?.hidden) {
+    closeExportMenu();
+    return;
+  }
+
+  openExportMenu();
+}
+
 function getActiveListLabel() {
   return getListConfig().label;
 }
 
+function getWishlistLabel() {
+  return getActiveWishlist().name;
+}
+
 function getProjectLabel() {
   return getActiveProject().name;
+}
+
+function getActiveCollectionLabel() {
+  if (activeListKey === "wishlist") return getWishlistLabel();
+  if (activeListKey === "projects") return getProjectLabel();
+  return getActiveListLabel();
+}
+
+function renderWishlistOptions() {
+  wishlistSelect.replaceChildren();
+
+  wishlistState.wishlists.forEach((wishlist) => {
+    const option = document.createElement("option");
+    option.value = wishlist.id;
+    option.textContent = wishlist.name;
+    wishlistSelect.append(option);
+  });
+
+  wishlistSelect.value = activeWishlistId;
 }
 
 function renderProjectOptions() {
@@ -494,9 +738,11 @@ function renderProjectOptions() {
 function updateListChrome() {
   const label = getActiveListLabel();
   appTitle.textContent = label;
+  wishlistControls.hidden = activeListKey !== "wishlist";
   projectControls.hidden = activeListKey !== "projects";
+  if (activeListKey === "wishlist") renderWishlistOptions();
   if (activeListKey === "projects") renderProjectOptions();
-  listHeading.textContent = activeListKey === "projects" ? `${getProjectLabel()} items` : "Your wishlist items";
+  listHeading.textContent = `${getActiveCollectionLabel()} items`;
   searchInput.placeholder = activeListKey === "projects" ? "Search projects" : "Search wishlist";
   formTitle.textContent = editingInput.value
     ? "Edit item"
@@ -509,6 +755,107 @@ function updateListChrome() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
+}
+
+function openNameModal({ title, label, value = "", submitText = "Save", onSubmit }) {
+  nameModalTitle.textContent = title;
+  nameModalLabel.textContent = label;
+  nameModalInput.value = value;
+  nameModalSubmitButton.textContent = submitText;
+  nameModalFeedback.textContent = "";
+  nameModalSubmitHandler = onSubmit;
+  nameModal.hidden = false;
+  window.requestAnimationFrame(() => {
+    nameModalInput.focus();
+    nameModalInput.select();
+  });
+}
+
+function closeNameModal() {
+  nameModal.hidden = true;
+  nameModalSubmitHandler = null;
+  nameModalFeedback.textContent = "";
+}
+
+function submitNameModal() {
+  const name = nameModalInput.value.trim();
+  if (!name) {
+    nameModalFeedback.textContent = "Please add a name.";
+    nameModalInput.focus();
+    return;
+  }
+
+  const submitHandler = nameModalSubmitHandler;
+  closeNameModal();
+  submitHandler?.(name);
+}
+
+function switchWishlist(wishlistId) {
+  if (!wishlistState.wishlists.some((wishlist) => wishlist.id === wishlistId)) return;
+
+  saveItems();
+  activeWishlistId = wishlistId;
+  wishlistState.activeWishlistId = activeWishlistId;
+  items = loadItems("wishlist");
+  resetForm();
+  showAllItems();
+  saveItems();
+  renderWithWorkspaceAnimation();
+  showFeedback(`Switched to ${getWishlistLabel()}.`);
+}
+
+function createWishlist() {
+  openNameModal({
+    title: "New wishlist",
+    label: "Wishlist name",
+    submitText: "Create wishlist",
+    onSubmit: createWishlistWithName,
+  });
+}
+
+function createWishlistWithName(name) {
+  saveItems();
+  const now = new Date().toISOString();
+  const wishlist = {
+    id: createId(),
+    name,
+    items: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  wishlistState.wishlists.push(wishlist);
+  activeWishlistId = wishlist.id;
+  wishlistState.activeWishlistId = wishlist.id;
+  wishlistState.updatedAt = now;
+  items = [];
+  resetForm();
+  showAllItems();
+  saveItems();
+  renderWithWorkspaceAnimation();
+  showFeedback(`${wishlist.name} created.`);
+}
+
+function renameWishlist() {
+  const wishlist = getActiveWishlist();
+  openNameModal({
+    title: "Rename wishlist",
+    label: "Wishlist name",
+    value: wishlist.name,
+    submitText: "Rename wishlist",
+    onSubmit: (name) => renameWishlistWithName(wishlist.id, name),
+  });
+}
+
+function renameWishlistWithName(wishlistId, name) {
+  const wishlist = wishlistState.wishlists.find((entry) => entry.id === wishlistId);
+  if (!wishlist) return;
+
+  wishlist.name = name;
+  wishlist.updatedAt = new Date().toISOString();
+  wishlistState.updatedAt = wishlist.updatedAt;
+  saveItems();
+  render();
+  showFeedback(`Wishlist renamed to ${wishlist.name}.`);
 }
 
 function switchProject(projectId) {
@@ -526,14 +873,20 @@ function switchProject(projectId) {
 }
 
 function createProject() {
-  const name = window.prompt?.("Project name:");
-  if (!name?.trim()) return;
+  openNameModal({
+    title: "New project",
+    label: "Project name",
+    submitText: "Create project",
+    onSubmit: createProjectWithName,
+  });
+}
 
+function createProjectWithName(name) {
   saveItems();
   const now = new Date().toISOString();
   const project = {
     id: createId(),
-    name: name.trim(),
+    name,
     items: [],
     createdAt: now,
     updatedAt: now,
@@ -552,10 +905,20 @@ function createProject() {
 
 function renameProject() {
   const project = getActiveProject();
-  const name = window.prompt?.("Rename project:", project.name);
-  if (!name?.trim()) return;
+  openNameModal({
+    title: "Rename project",
+    label: "Project name",
+    value: project.name,
+    submitText: "Rename project",
+    onSubmit: (name) => renameProjectWithName(project.id, name),
+  });
+}
 
-  project.name = name.trim();
+function renameProjectWithName(projectId, name) {
+  const project = projectState.projects.find((entry) => entry.id === projectId);
+  if (!project) return;
+
+  project.name = name;
   project.updatedAt = new Date().toISOString();
   projectState.updatedAt = project.updatedAt;
   saveItems();
@@ -573,7 +936,7 @@ function switchList(listKey) {
   resetForm();
   showAllItems();
   renderWithWorkspaceAnimation();
-  showFeedback(`Switched to ${getActiveListLabel()}.`);
+  showFeedback(`Switched to ${getActiveCollectionLabel()}.`);
 }
 
 function normalizeUrl(value) {
@@ -754,7 +1117,7 @@ function addSharedItemFromUrl() {
   render();
   showFeedback(
     saved
-      ? `${item.title} added to ${getActiveListLabel()}.`
+      ? `${item.title} added to ${getActiveCollectionLabel()}.`
       : `${item.title} added, but this browser is blocking saved storage.`,
     !saved,
   );
@@ -796,7 +1159,7 @@ function upsertItem(event) {
   render();
   showFeedback(
     saved
-      ? `${item.title} added to ${getActiveListLabel()}.`
+      ? `${item.title} added to ${getActiveCollectionLabel()}.`
       : `${item.title} added, but this browser is blocking saved storage.`,
     !saved,
   );
@@ -866,7 +1229,12 @@ function togglePurchased(id) {
   recentlyToggledItemId = item.id;
   const saved = saveItems();
   render();
-  showFeedback(saved ? `${getActiveListLabel()} updated.` : `${getActiveListLabel()} updated for this session only.`, !saved);
+  showFeedback(
+    saved
+      ? `${getActiveCollectionLabel()} updated.`
+      : `${getActiveCollectionLabel()} updated for this session only.`,
+    !saved,
+  );
 }
 
 function itemMatchesSearch(item, term) {
@@ -916,10 +1284,34 @@ function getVisibleItems() {
     });
 }
 
+function getItemCategories() {
+  return [...new Set(items.map((item) => item.category).filter(Boolean))].sort();
+}
+
+function createExportMenuButton(label, category = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("role", "menuitem");
+  button.dataset.exportCategory = category;
+  button.textContent = label;
+  return button;
+}
+
+function renderExportMenu(categories) {
+  if (!exportMenu) return;
+
+  exportMenu.replaceChildren(createExportMenuButton("Whole list"));
+
+  categories.forEach((category) => {
+    exportMenu.append(createExportMenuButton(`Only ${category}`, category));
+  });
+}
+
 function renderCategoryOptions() {
   const selected = categoryFilter.value;
-  const categories = [...new Set(items.map((item) => item.category).filter(Boolean))].sort();
+  const categories = getItemCategories();
   categoryFilter.innerHTML = '<option value="all">All categories</option>';
+  renderExportMenu(categories);
 
   categories.forEach((category) => {
     const option = document.createElement("option");
@@ -1043,8 +1435,8 @@ function escapeHtml(value) {
   });
 }
 
-function getShareableItems() {
-  return [...items].sort((a, b) => {
+function getShareableItems(itemList = items) {
+  return [...itemList].sort((a, b) => {
     if (a.purchased !== b.purchased) return Number(a.purchased) - Number(b.purchased);
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
@@ -1082,8 +1474,8 @@ function fromBase64Url(value) {
   return new TextDecoder().decode(bytes);
 }
 
-function getRestoreCode() {
-  return `${RESTORE_CODE_PREFIX}${toBase64Url(JSON.stringify(getShareableItems()))}`;
+function getRestoreCode(itemList = getShareableItems()) {
+  return `${RESTORE_CODE_PREFIX}${toBase64Url(JSON.stringify(itemList))}`;
 }
 
 function formatRestoreCodeForDisplay(code) {
@@ -1160,11 +1552,21 @@ function restoreWishlistItems(imported, successMessage) {
   );
 }
 
-function getPdfPrintHtml() {
-  const shareItems = getShareableItems();
-  const restoreCode = getRestoreCode();
+function getPdfExportItems(category = "") {
+  const sourceItems = category ? items.filter((item) => item.category === category) : items;
+  return getShareableItems(sourceItems);
+}
+
+function getPdfExportLabel(category = "") {
+  const listLabel = getActiveCollectionLabel();
+  return category ? `${listLabel}: ${category}` : listLabel;
+}
+
+function getPdfPrintHtml(category = "") {
+  const shareItems = getPdfExportItems(category);
+  const restoreCode = getRestoreCode(shareItems);
   const displayRestoreCode = formatRestoreCodeForDisplay(restoreCode);
-  const listLabel = activeListKey === "projects" ? getProjectLabel() : getActiveListLabel();
+  const listLabel = getPdfExportLabel(category);
   const regularFontUrl = new URL("fonts/opendyslexic3-regular.ttf", window.location.href).href;
   const boldFontUrl = new URL("fonts/opendyslexic3-bold.ttf", window.location.href).href;
   const exportedAt = new Date().toLocaleDateString(undefined, {
@@ -1350,7 +1752,7 @@ function getPdfPrintHtml() {
       ${cards || "<p>No wishlist items yet.</p>"}
       <section class="restore">
         <h2>Restore Code</h2>
-        <p>To import this list later, copy the code below and paste it into the app with Import code.</p>
+        <p>To import this export later, copy the code below and paste it into the app with Import code.</p>
         <pre>${escapeHtml(displayRestoreCode)}</pre>
       </section>
     </main>
@@ -1462,15 +1864,17 @@ function printWindowContent(printWindow, html) {
     });
 }
 
-function exportPdf() {
-  if (!items.length) {
-    showFeedback("Add at least one item before exporting.", true);
+function exportPdf(category = "") {
+  const exportItems = getPdfExportItems(category);
+
+  if (!exportItems.length) {
+    showFeedback(category ? `No ${category} items to export.` : "Add at least one item before exporting.", true);
     return;
   }
 
-  const html = getPdfPrintHtml();
+  const html = getPdfPrintHtml(category);
   setExportButtonBusy(true);
-  showFeedback("Preparing PDF export...");
+  showFeedback(category ? `Preparing ${category} PDF export...` : "Preparing PDF export...");
   const printWindow = window.open("", "_blank");
 
   if (printWindow?.document) {
@@ -1544,7 +1948,7 @@ function importRestoreCode() {
   if (!code) return;
 
   try {
-    restoreWishlistItems(decodeRestoreCode(code), `${getActiveListLabel()} restored from PDF restore code.`);
+    restoreWishlistItems(decodeRestoreCode(code), `${getActiveCollectionLabel()} restored from PDF restore code.`);
     closeRestoreModal();
   } catch (error) {
     restoreFeedback.textContent = error.message || "That restore code could not be imported.";
@@ -1559,7 +1963,7 @@ function importData(event) {
   reader.addEventListener("load", () => {
     try {
       const imported = JSON.parse(reader.result);
-      restoreWishlistItems(imported, `${getActiveListLabel()} imported.`);
+      restoreWishlistItems(imported, `${getActiveCollectionLabel()} imported.`);
       importInput.value = "";
     } catch (error) {
       alert(error.message);
@@ -1580,9 +1984,42 @@ listButtons.forEach((button) => {
   button.addEventListener("click", () => switchList(button.dataset.list));
 });
 projectSelect.addEventListener("change", () => switchProject(projectSelect.value));
+wishlistSelect.addEventListener("change", () => switchWishlist(wishlistSelect.value));
+newWishlistButton.addEventListener("click", createWishlist);
+renameWishlistButton.addEventListener("click", renameWishlist);
 newProjectButton.addEventListener("click", createProject);
 renameProjectButton.addEventListener("click", renameProject);
-exportPdfButton.addEventListener("click", exportPdf);
+nameModalSubmitButton.addEventListener("click", submitNameModal);
+nameModalCancelButton.addEventListener("click", closeNameModal);
+nameModalCloseButton.addEventListener("click", closeNameModal);
+nameModal.addEventListener("click", (event) => {
+  if (event.target === nameModal) closeNameModal();
+});
+nameModalInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitNameModal();
+  }
+});
+exportPdfButton.addEventListener("click", toggleExportMenu);
+exportMenu.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-export-category]");
+  if (!button) return;
+
+  closeExportMenu();
+  exportPdf(button.dataset.exportCategory || "");
+});
+document.addEventListener("click", (event) => {
+  if (exportPicker?.contains(event.target)) return;
+  closeExportMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeExportMenu();
+    if (!nameModal.hidden) closeNameModal();
+    if (!restoreModal.hidden) closeRestoreModal();
+  }
+});
 importCodeButton.addEventListener("click", openRestoreModal);
 restoreSubmitButton.addEventListener("click", importRestoreCode);
 restoreCancelButton.addEventListener("click", closeRestoreModal);

@@ -494,6 +494,45 @@ button:focus-visible,
   flex-wrap: wrap;
 }
 
+.export-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.export-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  min-width: 190px;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  box-shadow: 0 18px 36px rgba(24, 32, 28, 0.16);
+  padding: 6px;
+  animation: menuPop 180ms ease both;
+}
+
+.export-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 34px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  padding: 0 10px;
+  text-align: left;
+}
+
+.export-menu button:hover {
+  background: var(--surface-muted);
+  box-shadow: none;
+  transform: none;
+}
+
 #export-pdf.is-exporting {
   border-color: rgba(13, 117, 108, 0.34);
   background: linear-gradient(180deg, var(--accent-soft), #ffffff);
@@ -921,6 +960,18 @@ button:focus-visible,
   }
 }
 
+@keyframes menuPop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes emptyMarkIn {
   from {
     opacity: 0;
@@ -999,6 +1050,15 @@ button:focus-visible,
 
   .data-actions > * {
     flex: 1;
+  }
+
+  .export-picker {
+    display: flex;
+  }
+
+  .export-menu {
+    left: 0;
+    right: 0;
   }
 
   .wish-card {
